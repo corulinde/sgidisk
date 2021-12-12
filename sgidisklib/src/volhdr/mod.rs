@@ -1,8 +1,11 @@
 use std::io::Read;
+use std::fmt;
+use std::fmt::Formatter;
 
 use deku::prelude::*;
 
 use crate::SgidiskLibReadError;
+use crate::volhdr::raw::{VolumeDeviceParameters, VolumeDirectory};
 
 mod raw;
 
@@ -10,13 +13,27 @@ mod raw;
 #[derive(Debug)]
 pub struct SgidiskVolume {
   /// Size of disk sector in bytes
-  pub sector_sz: u64,
+  pub sector_sz: usize,
+  /// Command Tag Queueing enabled
+  pub ctq_enabled: bool,
+  /// Depth of Command Tag Queueing queue
+  pub ctq_depth: u8,
   /// Index of root partition
   pub root_partition: usize,
   /// Index of swap partition
   pub swap_partition: usize,
   /// Array of disk partitions
   pub partitions: Vec<Partition>,
+  /// Boot file name
+  pub boot_file: Option<String>,
+  /// Volume Directory file entries
+  pub files: Vec<VolumeFile>,
+
+  // Informational options described as "backwards compatibility only"
+  pub compat_cylinders: u16,
+  pub compat_heads: u16,
+  pub compat_sect: u16,
+  pub compat_drivecap: u32,
 }
 
 /// Partition table entry
@@ -66,6 +83,16 @@ pub enum PartitionType {
   Vxvm = 14,
 }
 
+/// Volume directory file entry
+#[derive(Debug)]
+pub struct VolumeFile {
+  pub file_name: Option<String>,
+  /// Starting block offset of file
+  pub block_start: u64,
+  /// File size (in bytes)
+  pub file_sz: u64,
+}
+
 impl SgidiskVolume {
   /// Synchronously read / deserialize a SgidiskVolume
   pub fn read<R: ?Sized>(reader: &mut R) -> Result<Self, SgidiskLibReadError>
@@ -97,16 +124,33 @@ impl TryFrom<&raw::VolumeHeader> for SgidiskVolume {
       _ => return Err(SgidiskLibReadError::Value(format!("Invalid swap partition index: {}", vh.vh_swappt)))
     };
 
+    let ctq_enabled = vh.vh_dp.dp_flags & VolumeDeviceParameters::DP_CTQ_EN == VolumeDeviceParameters::DP_CTQ_EN;
+
     // Convert partition table
     let partitions = vh.vh_pt.iter()
       .map(|pt| Partition::from(pt))
       .collect();
 
+    let boot_file = crate::bytes_to_string(&vh.vh_bootfile)?;
+
+    // Convert volume directory entries
+    let files = vh.vh_vd.iter()
+      .map(|vd| VolumeFile::try_from(vd))
+      .collect::<Result<Vec<VolumeFile>, SgidiskLibReadError>>()?;
+
     Ok(Self {
-      sector_sz: vh.vh_dp.dp_secbytes as u64,
+      sector_sz: vh.vh_dp.dp_secbytes as usize,
+      ctq_enabled,
+      ctq_depth: vh.vh_dp.dp_ctq_depth,
       root_partition,
       swap_partition,
       partitions,
+      boot_file,
+      files,
+      compat_cylinders: vh.vh_dp.dp_cylinders,
+      compat_heads: vh.vh_dp.dp_heads,
+      compat_sect: vh.vh_dp.dp_sect,
+      compat_drivecap: vh.vh_dp.dp_drivecap,
     })
   }
 }
@@ -119,5 +163,40 @@ impl From<&raw::PartitionTable> for Partition {
       block_sz: pt.pt_nblks as u64,
       block_start: pt.pt_firstlbn as u64,
     }
+  }
+}
+
+impl fmt::Display for PartitionType {
+  fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+    write!(f, "{:?}", self)
+  }
+}
+
+impl VolumeFile {
+  pub fn in_use(&self) -> bool {
+    self.file_name.is_some()
+  }
+}
+
+impl TryFrom<&raw::VolumeDirectory> for VolumeFile {
+  type Error = SgidiskLibReadError;
+
+  /// Convert from raw VolumeDirectory to VolumeFile struct
+  fn try_from(vd: &VolumeDirectory) -> Result<Self, Self::Error> {
+    let file_name = crate::bytes_to_string(&vd.vd_name)?;
+    let block_start = match u64::try_from(vd.vd_lbn) {
+      Ok(i) => i,
+      _ => return Err(SgidiskLibReadError::Value(format!("Invalid volume directory file offset: {}", vd.vd_lbn)))
+    };
+    let file_sz = match u64::try_from(vd.vd_nbytes) {
+      Ok(i) => i,
+      _ => return Err(SgidiskLibReadError::Value(format!("Invalid volume directory file size: {}", vd.vd_nbytes)))
+    };
+
+    Ok(Self {
+      file_name,
+      block_start,
+      file_sz,
+    })
   }
 }

@@ -1,0 +1,25 @@
+name: "sgidisktool"
+version: "0.1.0"
+author: "Elf"
+about: "Tool for interacting with SGI / IRIX disks and volumes"
+args:
+  - file:
+      short: f
+      long: file
+      value_name: FILE
+      help: Disk image filename
+      takes_value: true
+      required: true
+subcommands:
+  - vh:
+      about: Disk volume header
+      subcommands:
+        - info:
+            about: Information on a disk volume header
+            args:
+              - json:
+                  short: j
+                  long: json
+                  help: JSON output
+  - hash:
+      about: Hash disk image

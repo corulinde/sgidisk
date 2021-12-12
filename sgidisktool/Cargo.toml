@@ -6,3 +6,8 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+sgidisklib = { path = "../sgidisklib" }
+clap = { version = "2.34", features = ["yaml"] }
+tabled = "0.3"
+sha2 = "0.10"
+blake3 = "1.2"

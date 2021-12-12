@@ -102,6 +102,11 @@ pub(crate) struct VolumeDeviceParameters {
   pub(crate) dp_drivecap: u32,
 }
 
+impl VolumeDeviceParameters {
+  /// Enable command tag queueing
+  pub(crate) const DP_CTQ_EN: i32 = 0x00000040;
+}
+
 /// Boot blocks, bad sector tables, and the error summary table, are located
 /// via the volume_directory.
 #[derive(Debug, DekuRead, DekuWrite)]
