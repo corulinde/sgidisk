@@ -4,8 +4,8 @@ use std::process::exit;
 
 use blake3;
 use clap::ArgMatches;
-use sha2::{Sha512, Digest};
-use tabled::{Tabled, Table, Modify, Alignment, Column};
+use sha2::{Digest, Sha256};
+use tabled::{Tabled, Table};
 
 use sgidisklib::volhdr::SgidiskVolume;
 use crate::OpenVolume;
@@ -54,8 +54,8 @@ fn print_image_hash(h: MultiHashResult) {
 
   let tab = vec![
     ImageHash {
-      hash_type: "SHA-512",
-      hash_value: h.sha512,
+      hash_type: "SHA-256",
+      hash_value: h.sha256,
     },
     ImageHash {
       hash_type: "BLAKE3",
@@ -65,7 +65,6 @@ fn print_image_hash(h: MultiHashResult) {
 
   println!("Disk image hash:");
   print!("{}", Table::new(tab)
-    .with(Modify::new(Column(1..)).with(Alignment::left()))
     .with(crate::table_fmt()));
 }
 
@@ -88,8 +87,8 @@ fn print_vol_hashes(mut items: Vec<HashItem>) {
       vec![
         PartitionHash {
           partition: partition.clone(),
-          hash_type: "SHA-512",
-          hash: h.sha512,
+          hash_type: "SHA-256",
+          hash: h.sha256,
           short: short.clone(),
         },
         PartitionHash {
@@ -105,7 +104,6 @@ fn print_vol_hashes(mut items: Vec<HashItem>) {
 
   println!("Partition hashes:");
   print!("{}", Table::new(tab)
-    .with(Modify::new(Column(2..)).with(Alignment::left()))
     .with(crate::table_fmt()));
 }
 
@@ -128,8 +126,8 @@ fn print_file_hashes(mut items: Vec<HashItem>) {
       vec![
         FileHash {
           file: file.clone(),
-          hash_type: "SHA-512",
-          hash: h.sha512,
+          hash_type: "SHA-256",
+          hash: h.sha256,
           short: short.clone(),
         },
         FileHash {
@@ -145,7 +143,6 @@ fn print_file_hashes(mut items: Vec<HashItem>) {
 
   println!("Volume file hashes:");
   print!("{}", Table::new(tab)
-    .with(Modify::new(Column(2..)).with(Alignment::left()))
     .with(crate::table_fmt()));
 }
 
@@ -237,7 +234,7 @@ fn hashed_items(vh: &SgidiskVolume) -> Vec<HashItem> {
     .enumerate()
     .filter(|(_, p, )| p.in_use())
     .map(|(id, p, )| HashItem {
-      name: format!("{} ({})", id, p.partition_type),
+      name: format!("{:>2} ({})", id, p.partition_type),
       item_type: HashItemType::Partition,
       start: p.block_start as i64 * sgidisklib::efs::EFS_BLOCK_SZ as i64,
       end: (p.block_start + p.block_sz) as i64 * sgidisklib::efs::EFS_BLOCK_SZ as i64,
@@ -273,17 +270,17 @@ enum HashItemType {
   VolumeFile,
 }
 
-/// Hashes with BLAKE2b, SHA-512
+/// Hashes with BLAKE2b, SHA-256
 pub(crate) struct MultiHash {
   blake3: blake3::Hasher,
-  sha512: Sha512,
+  sha256: Sha256,
 }
 
 /// Results from MultiHash hashes
 #[derive(Debug)]
 pub(crate) struct MultiHashResult {
   pub(crate) blake3: String,
-  pub(crate) sha512: String,
+  pub(crate) sha256: String,
 }
 
 impl HashItem {
@@ -330,25 +327,25 @@ impl MultiHash {
   /// Create a new MultiHash hasher
   pub fn new() -> Self {
     let blake3 = blake3::Hasher::new();
-    let sha512 = Sha512::new();
+    let sha256 = Sha256::new();
 
     MultiHash {
       blake3,
-      sha512,
+      sha256,
     }
   }
 
   /// Update hash with data
   pub fn update(&mut self, b: &[u8]) {
     self.blake3.update(b);
-    self.sha512.update(b);
+    self.sha256.update(b);
   }
 
   /// Finalize hash and populate results
   pub fn finalize(self) -> MultiHashResult {
     MultiHashResult {
       blake3: Self::bytes_to_hex(self.blake3.finalize().as_bytes()),
-      sha512: Self::bytes_to_hex(&self.sha512.finalize()[..]),
+      sha256: Self::bytes_to_hex(&self.sha256.finalize()[..]),
     }
   }
 
