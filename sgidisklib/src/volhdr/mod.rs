@@ -184,9 +184,14 @@ impl TryFrom<&raw::VolumeDirectory> for VolumeFile {
   /// Convert from raw VolumeDirectory to VolumeFile struct
   fn try_from(vd: &VolumeDirectory) -> Result<Self, Self::Error> {
     let file_name = crate::bytes_to_string(&vd.vd_name)?;
-    let block_start = match u64::try_from(vd.vd_lbn) {
-      Ok(i) => i,
-      _ => return Err(SgidiskLibReadError::Value(format!("Invalid volume directory file offset: {}", vd.vd_lbn)))
+    let block_start = if vd.vd_lbn == -1 {
+      // Special case, older EFS systems seem to fill in w/ -1 instead of 0?
+      0
+    } else {
+      match u64::try_from(vd.vd_lbn) {
+        Ok(i) => i,
+        _ => return Err(SgidiskLibReadError::Value(format!("Invalid volume directory file offset: {}", vd.vd_lbn)))
+      }
     };
     let file_sz = match u64::try_from(vd.vd_nbytes) {
       Ok(i) => i,

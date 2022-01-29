@@ -1,32 +1,35 @@
+use std::collections::BTreeMap;
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Range;
 use std::process::exit;
 
 use blake3;
 use clap::ArgMatches;
+use serde::Serialize;
+use serde_json;
 use sha2::{Digest, Sha256};
-use tabled::{Tabled, Table};
+use tabled::{Table, Tabled};
 
 use sgidisklib::volhdr::SgidiskVolume;
+
 use crate::OpenVolume;
 
-const HASH_BUF_SZ: usize = 4096;
+const HASH_BUF_SZ: usize = 1024 * 16;
 
 /// Hash tool entry point
-pub(crate) fn subcommand(disk_file_name: &str, _cli_matches: &ArgMatches) {
+pub(crate) fn subcommand(disk_file_name: &str, cli_matches: &ArgMatches) {
   let mut vol = crate::OpenVolume::open_or_quit(disk_file_name);
 
-  print_hashes(&mut vol);
+  let json = cli_matches.is_present("json");
+  print_hashes(&mut vol, json);
 }
 
 /// Print hashes of volume files and volumes in disk image
-fn print_hashes(vol: &mut OpenVolume) {
+fn print_hashes(vol: &mut OpenVolume, json: bool) {
   let mut items = hashed_items(&vol.volume_header);
 
   // Fill hashes and collect/print whole image hash
   let image_hash = fill_hashes(vol, &mut items);
-  let image_hash = image_hash.finalize();
-  print_image_hash(image_hash);
 
   // Sort hashable items into files and volumes and collect/print hashes
   let (file_items, vol_items) = items.into_iter()
@@ -38,116 +41,27 @@ fn print_hashes(vol: &mut OpenVolume) {
             }
             (file_items, vol_items, )
           });
-  println!();
-  print_vol_hashes(vol_items);
-  println!();
-  print_file_hashes(file_items);
-}
 
-/// Print hash of whole disk image
-fn print_image_hash(h: MultiHashResult) {
-  #[derive(Tabled)]
-  struct ImageHash {
-    hash_type: &'static str,
-    hash_value: String,
+  if json {
+    let json_display = JsonHashDisplay::new(image_hash, file_items, vol_items);
+    println!("{}", serde_json::to_string(&json_display).unwrap());
+  } else {
+    let image_hash_display = ImageHashDisplayTable::from(image_hash);
+    let file_hashes = HashDisplayTable::from(file_items);
+    let vol_hashes = HashDisplayTable::from(vol_items);
+    println!("Disk image hash:");
+    image_hash_display.print();
+    println!();
+    println!("Volume file hashes:");
+    file_hashes.print();
+    println!();
+    println!("Volume hashes:");
+    vol_hashes.print();
   }
-
-  let tab = vec![
-    ImageHash {
-      hash_type: "SHA-256",
-      hash_value: h.sha256,
-    },
-    ImageHash {
-      hash_type: "BLAKE3",
-      hash_value: h.blake3,
-    },
-  ];
-
-  println!("Disk image hash:");
-  print!("{}", Table::new(tab)
-    .with(crate::table_fmt()));
-}
-
-/// Print hashes of volumes
-fn print_vol_hashes(mut items: Vec<HashItem>) {
-  #[derive(Tabled)]
-  struct PartitionHash {
-    partition: String,
-    hash_type: &'static str,
-    hash: String,
-    short: String,
-  }
-
-  items.sort_by(|h1, h2| h1.name.cmp(&h2.name));
-  let tab = items.into_iter()
-    .map(|h| {
-      let short = h.short_by_str();
-      let partition = h.name;
-      let h = h.hash.finalize();
-      vec![
-        PartitionHash {
-          partition: partition.clone(),
-          hash_type: "SHA-256",
-          hash: h.sha256,
-          short: short.clone(),
-        },
-        PartitionHash {
-          partition,
-          hash_type: "BLAKE3",
-          hash: h.blake3,
-          short,
-        },
-      ]
-    })
-    .flatten()
-    .collect::<Vec<PartitionHash>>();
-
-  println!("Partition hashes:");
-  print!("{}", Table::new(tab)
-    .with(crate::table_fmt()));
-}
-
-/// Print hashes of volume files
-fn print_file_hashes(mut items: Vec<HashItem>) {
-  #[derive(Tabled)]
-  struct FileHash {
-    file: String,
-    hash_type: &'static str,
-    hash: String,
-    short: String,
-  }
-
-  items.sort_by(|h1, h2| h1.name.cmp(&h2.name));
-  let tab = items.into_iter()
-    .map(|h| {
-      let short = h.short_by_str();
-      let file = h.name;
-      let h = h.hash.finalize();
-      vec![
-        FileHash {
-          file: file.clone(),
-          hash_type: "SHA-256",
-          hash: h.sha256,
-          short: short.clone(),
-        },
-        FileHash {
-          file,
-          hash_type: "BLAKE3",
-          hash: h.blake3,
-          short,
-        },
-      ]
-    })
-    .flatten()
-    .collect::<Vec<FileHash>>();
-
-  println!("Volume file hashes:");
-  print!("{}", Table::new(tab)
-    .with(crate::table_fmt()));
 }
 
 /// Fill hash data by reading over disk image, and return a hash for the whole image
-fn fill_hashes(vol: &mut OpenVolume, items: &mut Vec<HashItem>) -> MultiHash {
+fn fill_hashes(vol: &mut OpenVolume, items: &mut Vec<HashItem>) -> MultiHashResult {
   let len = items.len();
   let mut finished = vec![false; len];
 
@@ -190,7 +104,10 @@ fn fill_hashes(vol: &mut OpenVolume, items: &mut Vec<HashItem>) -> MultiHash {
           if let Some(overlap) = items[i].window_overlap(pos as i64, end as i64) {
             // Update the item's hash with the overlapping bytes
             items[i].hashed += (overlap.end - overlap.start) as u64;
-            items[i].hash.update(&buf[overlap]);
+            match items[i].hash.as_mut() {
+              Some(h) => h.update(&buf[overlap]),
+              _ => panic!("Missing hash entry")
+            }
           }
         }
 
@@ -205,8 +122,11 @@ fn fill_hashes(vol: &mut OpenVolume, items: &mut Vec<HashItem>) -> MultiHash {
     }
   }
 
+  // Finalize hashes
+  items.iter_mut().for_each(|i| i.finalize());
+
   // Return whole image hash
-  image_hash
+  image_hash.finalize()
 }
 
 /// Compile a list of items to hash out of volume files and partitions
@@ -218,13 +138,16 @@ fn hashed_items(vh: &SgidiskVolume) -> Vec<HashItem> {
     .filter(|f| f.in_use())
     .map(|f| {
       let start = f.block_start as i64 * sgidisklib::efs::EFS_BLOCK_SZ as i64;
+      let name = f.file_name.as_ref().unwrap();
       HashItem {
-        name: f.file_name.as_ref().unwrap().clone(),
+        name_display: name.clone(),
+        name_json: name.clone(),
         item_type: HashItemType::VolumeFile,
         start,
         end: start + f.file_sz as i64,
         hashed: 0,
-        hash: MultiHash::new(),
+        hash: Some(MultiHash::new()),
+        hash_result: None,
       }
     })
     .collect::<Vec<HashItem>>());
@@ -234,12 +157,14 @@ fn hashed_items(vh: &SgidiskVolume) -> Vec<HashItem> {
     .enumerate()
     .filter(|(_, p, )| p.in_use())
     .map(|(id, p, )| HashItem {
-      name: format!("{:>2} ({})", id, p.partition_type),
+      name_display: format!("{:>2} ({})", id, p.partition_type),
+      name_json: id.to_string(),
       item_type: HashItemType::Partition,
       start: p.block_start as i64 * sgidisklib::efs::EFS_BLOCK_SZ as i64,
       end: (p.block_start + p.block_sz) as i64 * sgidisklib::efs::EFS_BLOCK_SZ as i64,
       hashed: 0,
-      hash: MultiHash::new(),
+      hash: Some(MultiHash::new()),
+      hash_result: None,
     })
     .collect::<Vec<HashItem>>());
 
@@ -248,10 +173,154 @@ fn hashed_items(vh: &SgidiskVolume) -> Vec<HashItem> {
   items
 }
 
+/// JSON structure for hash display
+#[derive(Serialize)]
+struct JsonHashDisplay {
+  image: MultiHashResult,
+  volume_files: JsonHashItems,
+  volumes: JsonHashItems,
+}
+
+type JsonHashItems = BTreeMap<String, JsonHashElement>;
+
+/// JSON display entry for one hashable item
+#[derive(Serialize)]
+struct JsonHashElement {
+  hash: MultiHashResult,
+  short: Option<i64>,
+}
+
+impl JsonHashDisplay {
+  /// Create a JsonHashDisplay from a whole image hash, volume files hash set, and volume hash set
+  fn new(image: MultiHashResult, file_items: Vec<HashItem>, vol_items: Vec<HashItem>) -> Self {
+    let volume_files = Self::items(file_items);
+    let volumes = Self::items(vol_items);
+
+    JsonHashDisplay {
+      image,
+      volume_files,
+      volumes,
+    }
+  }
+
+  /// Create a JSON tree structure from a list of HashItem objects
+  fn items(items: Vec<HashItem>) -> JsonHashItems {
+    let mut json_tree = BTreeMap::new();
+
+    for i in items {
+      let over = i.short_by();
+      json_tree.insert(i.name_json,
+                       JsonHashElement {
+                         hash: i.hash_result.unwrap(),
+                         short: over,
+                       });
+    }
+
+    json_tree
+  }
+}
+
+/// A printable table of hashes for the entire image
+#[derive(Serialize)]
+struct ImageHashDisplayTable(Vec<ImageHashDisplayTableEntry>);
+
+/// Printable image hash entry
+#[derive(Tabled, Serialize)]
+struct ImageHashDisplayTableEntry {
+  #[header("Hash Type")]
+  hash_type: &'static str,
+  #[header("Hash")]
+  hash_value: String,
+}
+
+impl ImageHashDisplayTable {
+  /// Print formatted table to stdout
+  fn print(&self) {
+    print!("{}", Table::new(&self.0)
+      .with(crate::table_fmt()));
+  }
+}
+
+impl From<MultiHashResult> for ImageHashDisplayTable {
+  /// Convert a single MultiHashResult to a printable image hash table
+  fn from(h: MultiHashResult) -> Self {
+    let tab = vec![
+      ImageHashDisplayTableEntry {
+        hash_type: "SHA-256",
+        hash_value: h.sha256,
+      },
+      ImageHashDisplayTableEntry {
+        hash_type: "BLAKE3",
+        hash_value: h.blake3,
+      },
+    ];
+
+    ImageHashDisplayTable(tab)
+  }
+}
+
+/// A printable table of hashed items
+#[derive(Serialize)]
+struct HashDisplayTable(Vec<HashDisplayTableEntry>);
+
+/// Printable hashed item table entry
+#[derive(Tabled, Serialize)]
+struct HashDisplayTableEntry {
+  #[header("Item")]
+  item: String,
+  #[header("Hash Type")]
+  hash_type: &'static str,
+  #[header("Hash")]
+  hash: String,
+  #[header("Short?")]
+  short: String,
+}
+
+impl HashDisplayTable {
+  /// Print formatted table to stdout
+  fn print(&self) {
+    print!("{}", Table::new(&self.0)
+      .with(crate::table_fmt()));
+  }
+}
+
+impl From<Vec<HashItem>> for HashDisplayTable {
+  /// Convert from a list of HashItems to a printable table
+  fn from(mut items: Vec<HashItem>) -> Self {
+    items.sort_by(|h1, h2| h1.name_display.cmp(&h2.name_display));
+    let tab = items.into_iter()
+      .map(|h| {
+        let short = h.short_by_str();
+        let item = h.name_display;
+        let hash_result = h.hash_result.unwrap();
+        vec![
+          HashDisplayTableEntry {
+            item: item.clone(),
+            hash_type: "SHA-256",
+            hash: hash_result.sha256,
+            short: short.clone(),
+          },
+          HashDisplayTableEntry {
+            item,
+            hash_type: "BLAKE3",
+            hash: hash_result.blake3,
+            short,
+          },
+        ]
+      })
+      .flatten()
+      .collect::<Vec<HashDisplayTableEntry>>();
+
+    HashDisplayTable(tab)
+  }
+}
+
 /// Range based hashed item
 struct HashItem {
-  /// Name of hashed item
-  name: String,
+  /// Display name of hashed item
+  name_display: String,
+  /// JSON name of hashed item
+  name_json: String,
   /// Type of hashed item
   item_type: HashItemType,
   /// Start of hashed range (bytes)
@@ -261,7 +330,9 @@ struct HashItem {
   /// Number of bytes hashed
   hashed: u64,
   /// Hash value tracking
-  hash: MultiHash,
+  hash: Option<MultiHash>,
+  /// Hash result
+  hash_result: Option<MultiHashResult>,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -277,13 +348,18 @@ pub(crate) struct MultiHash {
 }
 
 /// Results from MultiHash hashes
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub(crate) struct MultiHashResult {
   pub(crate) blake3: String,
   pub(crate) sha256: String,
 }
 
 impl HashItem {
+  fn finalize(&mut self) {
+    let hash = self.hash.take().unwrap();
+    self.hash_result = Some(hash.finalize());
+  }
+
   /// Determine the overlap of our hashed item window into a supplied buffer window, as a range of bytes
   fn window_overlap(&self, start: i64, end: i64) -> Option<Range<usize>> {
     // No overlap case
@@ -318,7 +394,7 @@ impl HashItem {
   fn short_by_str(&self) -> String {
     match self.short_by() {
       None => "No".to_string(),
-      Some(n) => format!("Short {} bytes!", n)
+      Some(n) => format!("{} bytes!", n)
     }
   }
 }

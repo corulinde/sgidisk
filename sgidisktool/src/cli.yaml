@@ -23,3 +23,8 @@ subcommands:
                   help: JSON output
   - hash:
       about: Hash disk image
+      args:
+        - json:
+            short: j
+            long: json
+            help: JSON output
