@@ -205,18 +205,16 @@ impl JsonHashDisplay {
 
   /// Create a JSON tree structure from a list of HashItem objects
   fn items(items: Vec<HashItem>) -> JsonHashItems {
-    let mut json_tree = BTreeMap::new();
-
-    for i in items {
-      let over = i.short_by();
-      json_tree.insert(i.name_json,
-                       JsonHashElement {
-                         hash: i.hash_result.unwrap(),
-                         short: over,
-                       });
-    }
-
-    json_tree
+    items.into_iter()
+      .map(|item| {
+        let short = item.short_by();
+        (item.name_json,
+         JsonHashElement {
+           hash: item.hash_result.unwrap(),
+           short,
+         }, )
+      })
+      .collect::<BTreeMap<String, JsonHashElement>>()
   }
 }
 
@@ -255,7 +253,7 @@ impl From<MultiHashResult> for ImageHashDisplayTable {
       },
     ];
 
-    ImageHashDisplayTable(tab)
+    Self(tab)
   }
 }
 
