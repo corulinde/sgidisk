@@ -270,7 +270,7 @@ struct HashDisplayTableEntry {
   hash_type: &'static str,
   #[header("Hash")]
   hash: String,
-  #[header("Short?")]
+  #[header("Short? (bytes)")]
   short: String,
 }
 
@@ -392,7 +392,7 @@ impl HashItem {
   fn short_by_str(&self) -> String {
     match self.short_by() {
       None => "No".to_string(),
-      Some(n) => format!("{} bytes!", n)
+      Some(n) => format!("{}", n)
     }
   }
 }

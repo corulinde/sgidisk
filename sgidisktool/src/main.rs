@@ -1,7 +1,9 @@
 use std::fs;
+use std::fs::File;
+use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::process::exit;
 
-use clap::{load_yaml, App};
+use clap::{App, load_yaml};
 use tabled::Style;
 
 mod exit_codes;
@@ -91,4 +93,27 @@ impl<'a> OpenVolume<'a> {
 /// Standard table formatting
 pub(crate) fn table_fmt() -> Style {
   Style::pseudo_clean()
+}
+
+/// Copy one section of a File to another File
+pub(crate) fn cp(src: &mut File, src_start: u64, src_len: u64, dst: &mut File, dst_start: u64) -> Result<(), std::io::Error> {
+  // Seek to start of read
+  if let Err(e) = src.seek(SeekFrom::Start(src_start)) {
+    eprintln!("cp: Error seeking to beginning of src read: {:?}", &e);
+    return Err(e);
+  }
+  // Seek to start of write
+  if let Err(e) = dst.seek(SeekFrom::Start(dst_start)) {
+    eprintln!("cp: Error seeking to beginning of dst write: {:?}", &e);
+    return Err(e);
+  }
+
+  // Use BufReader to stream copy
+  let mut read = BufReader::new(src).take(src_len);
+  if let Err(e) = std::io::copy(&mut read, dst) {
+    eprintln!("cp: Error copying from src to dst: {:?}", &e);
+    return Err(e);
+  }
+
+  Ok(())
 }

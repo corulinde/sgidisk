@@ -2,12 +2,14 @@ use std::process::exit;
 use clap::ArgMatches;
 
 mod info;
+mod cp;
 
 /// Volume Header tool entry point
 pub(crate) fn subcommand(disk_file_name: &str, cli_matches: &ArgMatches) {
   match cli_matches.subcommand_name() {
     // Volume Header tool
     Some("info") => info::subcommand(disk_file_name, cli_matches.subcommand_matches("info").unwrap()),
+    Some("cp") => cp::subcommand(disk_file_name, cli_matches.subcommand_matches("cp").unwrap()),
 
     // Unimplemented / unknown sub-command
     Some(subcommand_name) => {

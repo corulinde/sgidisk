@@ -4,3 +4,5 @@ pub(crate) const CLI_ARG_ERROR: i32 = 1;
 pub(crate) const VH_OPEN_ERR: i32 = 2;
 /// Disk IO error
 pub(crate) const IO_ERR: i32 = 3;
+/// Glob pattern error
+pub(crate) const GLOB_ERR: i32 = 4;

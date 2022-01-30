@@ -21,6 +21,21 @@ subcommands:
                   short: j
                   long: json
                   help: JSON output
+        - cp:
+            about: Copy disk volume header file
+            args:
+              - src:
+                  help: Source file
+                  index: 1
+                  required: true
+              - dest:
+                  help: Destination file
+                  index: 2
+                  required: true
+              - verbose:
+                  short: v
+                  long: verbose
+                  help: Verbose output
   - hash:
       about: Hash disk image
       args:
