@@ -4,10 +4,10 @@ author: "Elf"
 about: "Tool for interacting with SGI / IRIX disks and volumes"
 args:
   - file:
+      help: Disk image filename
       short: f
       long: file
       value_name: FILE
-      help: Disk image filename
       takes_value: true
       required: true
 subcommands:
@@ -43,3 +43,42 @@ subcommands:
             short: j
             long: json
             help: JSON output
+  - efs:
+      about: EFS volume
+      args:
+        - partition:
+            help: Partition ID
+            short: p
+            long: partition
+            takes_value: true
+            required: true
+      subcommands:
+        - info:
+            about: Information on an EFS volume
+            args:
+              - json:
+                  short: j
+                  long: json
+                  help: JSON output
+        - ls:
+            about: List files in EFS volume
+            args:
+              - pattern:
+                  help: Pattern of files to list
+                  index: 1
+                  required: false
+        - cp:
+            about: Copy EFS file
+            args:
+              - src:
+                  help: Source file
+                  index: 1
+                  required: true
+              - dest:
+                  help: Destination file
+                  index: 2
+                  required: true
+              - verbose:
+                  short: v
+                  long: verbose
+                  help: Verbose output

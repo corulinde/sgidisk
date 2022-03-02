@@ -4,11 +4,20 @@ use std::io::{BufReader, Read, Seek, SeekFrom};
 use std::process::exit;
 
 use clap::{App, load_yaml};
+use glob::MatchOptions;
 use tabled::Style;
 
 mod exit_codes;
 mod hash;
 mod vh;
+mod efs;
+
+/// Glob matching options; case sensitive, expressions don't match separators, hidden dotfiles
+pub(crate) const GLOB_OPT: MatchOptions = MatchOptions {
+  case_sensitive: true,
+  require_literal_separator: true,
+  require_literal_leading_dot: true,
+};
 
 /// Main sgidisktool CLI entry point
 fn main() {
@@ -23,6 +32,8 @@ fn main() {
     Some("vh") => vh::subcommand(disk_file_name, cli_matches.subcommand_matches("vh").unwrap()),
     // Hash tool
     Some("hash") => hash::subcommand(disk_file_name, cli_matches.subcommand_matches("hash").unwrap()),
+    // Efs tool
+    Some("efs") => efs::subcommand(disk_file_name, cli_matches.subcommand_matches("efs").unwrap()),
 
     // Unimplemented / unknown sub-command
     Some(subcommand_name) => {

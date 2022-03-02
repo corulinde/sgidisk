@@ -3,16 +3,9 @@ use std::path::PathBuf;
 use std::process::exit;
 
 use clap::ArgMatches;
-use glob::{MatchOptions, Pattern};
+use glob::Pattern;
 
 use crate::OpenVolume;
-
-/// Glob matching options; case sensitive, expressions don't match separators, hidden dotfiles
-const GLOB_OPT: MatchOptions = MatchOptions {
-  case_sensitive: true,
-  require_literal_separator: true,
-  require_literal_leading_dot: true,
-};
 
 /// Volume Header File copy entry point
 pub(crate) fn subcommand(disk_file_name: &str, cli_matches: &ArgMatches) {
@@ -93,7 +86,7 @@ fn matches(vol: &OpenVolume, glob: &Pattern) -> Vec<usize> {
   files.iter().enumerate()
     .filter(|(_id, vf, )| vf.in_use())
     .filter(|(_id, vf, )| match vf.file_name.as_ref() {
-      Some(name) => glob.matches_with(name.as_str(), GLOB_OPT),
+      Some(name) => glob.matches_with(name.as_str(), crate::GLOB_OPT),
       None => false
     })
     .map(|(id, _vf)| id)

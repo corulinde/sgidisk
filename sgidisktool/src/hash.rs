@@ -392,7 +392,7 @@ impl HashItem {
   fn short_by_str(&self) -> String {
     match self.short_by() {
       None => "No".to_string(),
-      Some(n) => format!("{}", n)
+      Some(n) => format!("Yes ({})", n)
     }
   }
 }
